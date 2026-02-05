@@ -7,7 +7,7 @@
  *
  * @example
  * ```bash
- * npx -y @claude-essentials/mcp-egov-law
+ * npx -y egov-law-mcp
  * ```
  */
 

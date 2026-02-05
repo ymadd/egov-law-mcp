@@ -2,8 +2,8 @@
  * XML パーサーのテスト
  */
 
-const { test, describe, beforeEach, afterEach } = require('node:test')
-const assert = require('node:assert')
+import { test, describe } from 'node:test'
+import assert from 'node:assert'
 
 // Note: これらのテストは TypeScript コンパイル後に実行されることを想定
 // テスト用のサンプルXMLデータ

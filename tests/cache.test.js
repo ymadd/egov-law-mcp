@@ -2,11 +2,11 @@
  * キャッシュのテスト
  */
 
-const { test, describe, beforeEach, afterEach } = require('node:test')
-const assert = require('node:assert')
-const { mkdir, rm, readdir } = require('node:fs/promises')
-const { join } = require('node:path')
-const { tmpdir } = require('node:os')
+import { test, describe, beforeEach, afterEach } from 'node:test'
+import assert from 'node:assert'
+import { mkdir, rm, readdir } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 
 describe('Cache Tests', () => {
   const testCacheDir = join(tmpdir(), 'egov-law-mcp-test-cache')

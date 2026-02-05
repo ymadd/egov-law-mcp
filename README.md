@@ -13,7 +13,7 @@
 ### Claude Code で使う
 
 ```bash
-npx -y @claude-essentials/mcp-egov-law
+npx -y egov-law-mcp
 ```
 
 ### claude_desktop_config.json に追加
@@ -23,7 +23,7 @@ npx -y @claude-essentials/mcp-egov-law
   "mcpServers": {
     "egov-law": {
       "command": "npx",
-      "args": ["-y", "@claude-essentials/mcp-egov-law"]
+      "args": ["-y", "egov-law-mcp"]
     }
   }
 }

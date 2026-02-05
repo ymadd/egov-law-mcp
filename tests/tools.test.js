@@ -2,8 +2,8 @@
  * ツールのテスト
  */
 
-const { test, describe } = require('node:test')
-const assert = require('node:assert')
+import { test, describe } from 'node:test'
+import assert from 'node:assert'
 
 describe('Tool Definition Tests', () => {
   test('search_laws tool definition should be valid', () => {
