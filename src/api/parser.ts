@@ -43,8 +43,11 @@ export function parseLawList(xml: string): SearchResult {
   const result = parser.parse(xml)
   const dataRoot = result.DataRoot || result
 
-  const lawList = dataRoot.LawNameListInfo || []
-  const laws: LawInfo[] = lawList.map((item: Record<string, unknown>) => ({
+  // e-Gov APIの構造: DataRoot > ApplData > LawNameListInfo
+  const applData = dataRoot.ApplData || dataRoot
+  const lawList = applData.LawNameListInfo || dataRoot.LawNameListInfo || []
+
+  const laws: LawInfo[] = ensureArray(lawList).map((item: Record<string, unknown>) => ({
     lawId: String(item.LawId || ''),
     lawNumber: String(item.LawNo || ''),
     lawName: String(item.LawName || ''),
@@ -69,7 +72,15 @@ export function parseLawList(xml: string): SearchResult {
  */
 export function parseLawText(xml: string): LawText {
   const result = parser.parse(xml)
-  const lawData = result.Law || result.LawFullText?.Law || result
+  const dataRoot = result.DataRoot || result
+
+  // e-Gov APIの構造: DataRoot > ApplData > LawFullText > Law
+  const applData = dataRoot.ApplData || dataRoot
+  const lawFullText = applData.LawFullText || applData
+  const lawData = lawFullText.Law || lawFullText
+
+  // 法令IDを取得（ApplDataから）
+  const lawId = applData.LawId || lawData['@_LawId'] || ''
 
   const lawNum = lawData.LawNum || lawData['@_LawNum'] || ''
   const lawBody = lawData.LawBody || {}
@@ -79,7 +90,7 @@ export function parseLawText(xml: string): LawText {
   const content = extractLawContent(lawBody)
 
   return {
-    lawId: String(lawData['@_LawId'] || ''),
+    lawId: String(lawId),
     lawNumber: String(lawNum),
     lawName: extractText(lawTitle),
     content,
@@ -97,8 +108,16 @@ export function parseArticle(
   targetParagraph?: number
 ): Article | null {
   const result = parser.parse(xml)
-  const lawData = result.Law || result.LawFullText?.Law || result
+  const dataRoot = result.DataRoot || result
+
+  // e-Gov APIの構造: DataRoot > ApplData > LawFullText > Law
+  const applData = dataRoot.ApplData || dataRoot
+  const lawFullText = applData.LawFullText || applData
+  const lawData = lawFullText.Law || lawFullText
   const lawBody = lawData.LawBody || {}
+
+  // 法令IDを取得（ApplDataから）
+  const lawId = applData.LawId || lawData['@_LawId'] || ''
 
   const article = findArticle(lawBody, targetArticle)
   if (!article) {
@@ -108,7 +127,7 @@ export function parseArticle(
   const paragraphs = extractParagraphs(article, targetParagraph)
 
   return {
-    lawId: String(lawData['@_LawId'] || ''),
+    lawId: String(lawId),
     articleNum: targetArticle,
     articleTitle: article.ArticleTitle
       ? extractText(article.ArticleTitle)

@@ -2,7 +2,7 @@
  * e-Gov 法令 API クライアント
  */
 
-import type { LawCategory, LawText, Article, SearchResult, ApiResponse } from './types.js'
+import type { LawCategory, LawText, Article, SearchResult, ApiResponse, LawInfo } from './types.js'
 import { parseLawList, parseLawText, parseArticle } from './parser.js'
 
 const BASE_URL = 'https://laws.e-gov.go.jp/api/1'
@@ -19,6 +19,7 @@ interface RequestOptions {
  */
 export class EGovLawClient {
   private readonly timeout: number
+  private lawListCache: Map<number, LawInfo[]> = new Map()
 
   constructor(options: { timeout?: number } = {}) {
     this.timeout = options.timeout ?? 30000
@@ -26,34 +27,70 @@ export class EGovLawClient {
 
   /**
    * 法令を検索
+   * e-Gov APIにはキーワード検索がないため、カテゴリ一覧を取得してクライアント側でフィルタリング
    */
   async searchLaws(params: {
     keyword?: string
     category?: LawCategory
-    lawType?: string
-    promulgationDateFrom?: string
-    promulgationDateTo?: string
   }): Promise<ApiResponse<SearchResult>> {
-    const queryParams = new URLSearchParams()
+    const { keyword, category } = params
 
-    if (params.keyword) {
-      queryParams.set('keyword', params.keyword)
-    }
-    if (params.category) {
-      queryParams.set('category', String(params.category))
-    }
-    if (params.lawType) {
-      queryParams.set('law_type', params.lawType)
-    }
-    if (params.promulgationDateFrom) {
-      queryParams.set('promulgation_date_from', params.promulgationDateFrom)
-    }
-    if (params.promulgationDateTo) {
-      queryParams.set('promulgation_date_to', params.promulgationDateTo)
+    // カテゴリが指定されていない場合は全カテゴリを検索
+    const categories = category ? [category] : [1, 2, 3, 4]
+    const allLaws: LawInfo[] = []
+
+    for (const cat of categories) {
+      const result = await this.getLawListByCategory(cat as LawCategory)
+      if (result.success) {
+        allLaws.push(...result.data.laws)
+      }
     }
 
-    const url = `${BASE_URL}/lawlists?${queryParams.toString()}`
-    return this.fetchWithRetry(url, (xml) => parseLawList(xml))
+    // キーワードでフィルタリング
+    let filteredLaws = allLaws
+    if (keyword) {
+      const normalizedKeyword = keyword.toLowerCase()
+      filteredLaws = allLaws.filter(
+        (law) =>
+          law.lawName.toLowerCase().includes(normalizedKeyword) ||
+          law.lawNumber.includes(keyword) ||
+          (law.lawNameKana && law.lawNameKana.includes(keyword))
+      )
+    }
+
+    return {
+      success: true,
+      data: {
+        totalCount: filteredLaws.length,
+        laws: filteredLaws.slice(0, 100), // 最大100件
+      },
+    }
+  }
+
+  /**
+   * カテゴリ別法令一覧を取得
+   */
+  async getLawListByCategory(category: LawCategory): Promise<ApiResponse<SearchResult>> {
+    // キャッシュをチェック
+    const cached = this.lawListCache.get(category)
+    if (cached) {
+      return {
+        success: true,
+        data: {
+          totalCount: cached.length,
+          laws: cached,
+        },
+      }
+    }
+
+    const url = `${BASE_URL}/lawlists/${category}`
+    const result = await this.fetchWithRetry(url, (xml) => parseLawList(xml))
+
+    if (result.success) {
+      this.lawListCache.set(category, result.data.laws)
+    }
+
+    return result
   }
 
   /**
@@ -79,6 +116,14 @@ export class EGovLawClient {
       (law) => law.lawNumber === lawNumber
     )
     if (!exactMatch) {
+      // 部分一致を試みる
+      const partialMatch = searchResult.data.laws.find(
+        (law) => law.lawNumber.includes(lawNumber) || lawNumber.includes(law.lawNumber)
+      )
+      if (partialMatch) {
+        return this.getLawById(partialMatch.lawId)
+      }
+
       return {
         success: false,
         error: {
@@ -99,13 +144,6 @@ export class EGovLawClient {
     article: string
     paragraph?: number
   }): Promise<ApiResponse<Article>> {
-    // まず法令本文を取得
-    const lawResult = await this.getLawById(params.lawId)
-    if (!lawResult.success) {
-      return lawResult
-    }
-
-    // 取得したXMLから条文を抽出（再度XMLを取得）
     const url = `${BASE_URL}/lawdata/${encodeURIComponent(params.lawId)}`
     return this.fetchWithRetry(url, (xml) => {
       const article = parseArticle(xml, params.article, params.paragraph)
@@ -119,27 +157,9 @@ export class EGovLawClient {
   }
 
   /**
-   * 更新法令一覧を取得
-   */
-  async getUpdatedLaws(params: {
-    from: string
-    to?: string
-  }): Promise<ApiResponse<SearchResult>> {
-    const queryParams = new URLSearchParams()
-    queryParams.set('updated_from', params.from)
-    if (params.to) {
-      queryParams.set('updated_to', params.to)
-    }
-
-    const url = `${BASE_URL}/lawlists/updated?${queryParams.toString()}`
-    return this.fetchWithRetry(url, (xml) => parseLawList(xml))
-  }
-
-  /**
    * 類似法令を検索（法令番号が不明な場合のフォールバック）
    */
   async findSimilarLaws(query: string): Promise<ApiResponse<SearchResult>> {
-    // キーワード検索を実行
     const result = await this.searchLaws({ keyword: query })
     if (!result.success) {
       return result
@@ -156,7 +176,7 @@ export class EGovLawClient {
       success: true,
       data: {
         totalCount: sortedLaws.length,
-        laws: sortedLaws.slice(0, 10), // 上位10件
+        laws: sortedLaws.slice(0, 10),
       },
     }
   }
@@ -203,8 +223,21 @@ export class EGovLawClient {
         }
 
         const xml = await response.text()
-        const data = parser(xml)
 
+        // APIエラーレスポンスをチェック
+        if (xml.includes('<Code>1</Code>')) {
+          const messageMatch = xml.match(/<Message>([^<]*)<\/Message>/)
+          const errorMessage = messageMatch ? messageMatch[1] : 'APIエラーが発生しました'
+          return {
+            success: false,
+            error: {
+              code: 'API_ERROR',
+              message: errorMessage,
+            },
+          }
+        }
+
+        const data = parser(xml)
         return { success: true, data }
       } catch (error) {
         lastError = error as Error
